@@ -1,0 +1,253 @@
+---
+title: "TS_Final_Project"
+author: "Marc Edwards"
+date: "2023-05-25"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r}
+library(tidyverse)
+library(stats)
+library(car)
+library(forecast)
+library(xts)
+library(readxl)
+library(lubridate)
+library(tseries)
+library(TSA)
+library(timeSeries)
+```
+
+
+# Time Series Analysis of Used Car Sales
+
+```{r}
+# load data
+
+usedCars <- read.csv("retailSales_usedCars.csv") # https://fred.stlouisfed.org/series/MRTSSM44112USN
+usedCars$DATE <- as.Date(usedCars$DATE)
+usedCars$Revenue <- usedCars$MRTSSM44112USN
+```
+
+```{r}
+summary(usedCars)
+```
+
+```{r}
+# transforming objects to ts objects
+used_xts <- xts(usedCars$Revenue, order.by = usedCars$DATE)
+ts_used <- ts(usedCars$Revenue)
+```
+
+```{r}
+plot.xts(used_xts)
+
+```
+
+```{r}
+acf(used_xts, lag.max = length(used_xts),
+         xlab = "lag #", ylab = 'ACF',main=' ') # non-stationary = seasonal
+```
+```{r}
+adf.test(used_xts) # non-stationary
+kpss.test(used_xts) # non-stationary
+```
+
+
+## ts objects for seasonality and SARIMA models
+
+```{r}
+# transforming objects to ts objects 
+ts_used <- ts(usedCars$Revenue)
+```
+
+```{r}
+# monthly
+ts_monthly <- ts(usedCars$Revenue, frequency = 1)
+```
+
+```{r}
+arima_monthly <- auto.arima(ts_monthly, seasonal = TRUE)
+arima_monthly # (2,1,3)
+```
+
+```{r}
+durbinWatsonTest(arima_monthly$residuals[1:375])
+Box.test(resid(arima_monthly), type="Ljung-Box")$p.value
+
+plot(x = 1:length(arima_monthly$residuals), y = arima_monthly$residuals, 
+     xlab = "Index", ylab = "Residuals", main = "Monthly SARIMA Residual Plot")
+abline(h = 0)
+```
+
+```{r}
+fc_month <- forecast(arima_monthly, h = 12)
+
+plot(fc_month, main = "12-Month Prediction - Monthly SARIMA", 
+     xlab = "Periods", ylab = "Value, in Millions of Dollars")
+
+fc_month$mean
+fc_monthPred = c(16840.13, 16341.07, 15493.07, 14561.71, 13810.12, 13429.62,
+                 13495.64, 13958.48, 14667.95, 15422.46, 16027.05, 16344.42)
+```
+
+
+
+```{r}
+# quarterly
+ts_quarterly <- ts(usedCars$Revenue, frequency = 3)
+```
+
+```{r}
+arima_quarterly <- auto.arima(ts_quarterly, seasonal = TRUE)
+arima_quarterly # (2,1,2) (0,0,1)
+```
+
+```{r}
+durbinWatsonTest(arima_quarterly$residuals[1:375])
+Box.test(resid(arima_quarterly), type="Ljung-Box")$p.value
+
+plot(x = 1:length(arima_quarterly$residuals), y = arima_quarterly$residuals, 
+     xlab = "Index", ylab = "Residuals", main = "Quarterly SARIMA Residual Plot")
+abline(h = 0)
+```
+
+```{r}
+fc_quarter <- forecast(arima_quarterly, h = 12)
+
+plot(fc_quarter, main = "12-Month Prediction - Quarterly SARIMA", 
+     xlab = "Periods", ylab = "Value, in Millions of Dollars")
+
+fc_quarter$mean
+fc_quarterPred <- c(16355.16, 15335.06, 14674.22, 14517.19, 14678.93, 14634.16, 
+                    14720.10, 14721.51, 14776.52, 14796.92, 14839.30, 14867.52)
+```
+
+
+
+```{r}
+# quarterly
+ts_yearly <- ts(usedCars$Revenue, frequency = 12)
+```
+
+```{r}
+arima_yearly <- auto.arima(ts_yearly, seasonal = TRUE)
+arima_yearly # (3,0,2) (0,1,2)
+```
+
+```{r}
+durbinWatsonTest(arima_yearly$residuals[1:375])
+Box.test(resid(arima_yearly), type="Ljung-Box")$p.value
+
+plot(x = 1:length(arima_yearly$residuals), y = arima_yearly$residuals, 
+     xlab = "Index", ylab = "Residuals", main = "Yearly SARIMA Residual Plot")
+abline(h = 0)
+
+```
+
+```{r}
+fc_year <- forecast(arima_yearly, h = 12)
+
+plot(fc_year, main = "12-Month Prediction - Yearly SARIMA", 
+     xlab = "Periods", ylab = "Value, in Millions of Dollars")
+
+fc_year$mean
+fc_yearPred <- c(14924.80, 15128.68, 15060.18, 14733.46, 14992.33, 14238.30,
+                 14313.71, 13379.86, 12901.37, 13261.10, 14158.03, 17203.19)
+```
+
+
+## COVID-19 intervention analysis
+
+```{r}
+postcovid <- used_xts["2020-03-01/2023-03-01"]
+postcovid_ts <- ts(postcovid, frequency = 12)
+auto.arima(postcovid_ts)
+```
+
+
+```{r}
+
+precovid <- used_xts["1992-01-01/2020-02-28"]
+precovid_ts <- ts(precovid, frequency = 12)
+auto.arima(precovid_ts)
+
+Pcovid <- (seq(ts_used)==337) * 1
+Scovid <- (seq(ts_used)>=337) * 1
+
+#Pcovid <- as.numeric(Pcovid)
+#Scovid <- as.numeric(Scovid)
+
+covid.mPulse <- arimax(ts_used, order = c(1,0,1), seasonal = list(order = c(0,1,1), period = 12), 
+                     xtransf = data.frame(Pcovid, Pcovid), transfer = list(c(0,0), c(1,0)), method = 'ML')
+
+covid.mPulse
+
+plot(ts(filter(Pcovid, filter = 0.8517, method = 'recursive', side = 1) * (-217.795),
+        frequency = 12, start = 1992), type = 'h', ylab = 'COVID-19 Pulse Effects')
+```
+
+```{r}
+covid.mStep <- arimax(ts_used,order = c(1,0,1), seasonal = list(order=c(0,1,1), period = 12), 
+                      xtransf = data.frame(Scovid, Scovid), 
+                      transfer = list(c(0,0),c(1,0)), method = 'ML')
+covid.mStep
+
+plot(ts(Scovid*(-145.5375) + filter(Scovid, filter = 0, method = 'recursive', side = 1)*(-145.5375), 
+        frequency = 12, start = 1992), type = 'h', ylab = 'COVID-19 Step Effects')
+
+```
+
+
+```{r}
+steps.ahead = 12
+
+covid.m1 <- arimax(ts_used, order = c(1,0,1), seasonal = c(0,1,1), 
+                   xtransf = data.frame(Icovid = 1*(seq(ts_used) == 338)), 
+                   transfer = list(c(1,0)))
+
+covid.m1
+
+tf <- filter(1*(seq(1:(length(ts_used) + steps.ahead)) == 337), filter = 0.1839,
+             method = 'recursive', side = 1) * (-1709.0745)
+
+forecast.arima <- Arima(ts_used, order = c(1,0,1), seasonal = c(0,1,1),
+                        xreg = tf[1:(length(tf) - steps.ahead)])
+
+forecast.arima
+
+predict(forecast.arima, n.ahead = 12, newxreg = tf[length(tf) - steps.ahead + 1:length(tf)])
+
+arimaxPred12 <- c(16888.69, 16739.96, 16593.54, 16449.41, 16307.52, 16167.85,
+                  16030.35, 15895.00, 15761.76, 15630.60, 15501.48, 15374.37)
+```
+## Prediction Table DF
+
+```{r}
+# Create a data frame with the values and labels
+df <- data.frame(
+  Month = c("April 2023", "May 2023", "June 2023", "July 2023", "August 2023",
+            "September 2023", "October 2023", "November 2023", "December 2023",
+            "January 2024", "February 2024", "March 2024"),
+  Monthly_SARIMA_Prediction = fc_monthPred,
+  Quarterly_SARIMA_Prediction = fc_quarterPred,
+  Yearly_SARIMA_Prediction = fc_yearPred,
+  ARIMAX_Prediction = arimaxPred12)
+
+df
+
+plot((1:12), df$Monthly_SARIMA_Prediction, type = "l", xlab = "Months after March 2023",
+     ylab = "Prediction Value, in Millions of Dollars", main = "Line Chart of Predictions Over Time")
+lines((1:12), df$Quarterly_SARIMA_Prediction, col = "red")
+lines((1:12), df$Yearly_SARIMA_Prediction, col = "blue")
+lines((1:12), df$ARIMAX_Prediction, col = "green")
+#legend("topleft", legend = c("Monthly_SARIMA_Prediction", "Quarterly_SARIMA_Prediction",
+#                             "Yearly_SARIMA_Prediction", "ARIMAX_Prediction"),
+#       col = c("black", "red", "blue", "green"), lty = 1)
+```
+
+
+
